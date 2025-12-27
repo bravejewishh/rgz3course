@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+
+{% block title %}{% if employee %}Редактирование{% else %}Добавление{% endif %} сотрудника{% endblock %}
+
+{% block content %}
+<h2>{% if employee %}✏️ Редактирование сотрудника{% else %}➕ Добавление нового сотрудника{% endif %}</h2>
+
+<form method="POST" action="{% if employee %}{{ url_for('edit_employee', id=employee.id) }}{% else %}{{ url_for('new_employee') }}{% endif %}">
+    <div class="form-group">
+        <label for="full_name">ФИО *</label>
+        <input type="text" id="full_name" name="full_name" 
+               value="{{ employee.full_name if employee else '' }}" required>
+        <small>Минимум 2 символа</small>
+    </div>
+    
+    <div class="form-group">
+        <label for="position">Должность *</label>
+        <input type="text" id="position" name="position" 
+               value="{{ employee.position if employee else '' }}" required>
+    </div>
+    
+    <div class="form-group">
+        <label for="gender">Пол *</label>
+        <select id="gender" name="gender" required>
+            <option value="">-- Выберите пол --</option>
+            <option value="муж" {% if employee and employee.gender == 'муж' %}selected{% endif %}>Мужской</option>
+            <option value="жен" {% if employee and employee.gender == 'жен' %}selected{% endif %}>Женский</option>
+        </select>
+    </div>
+    
+    <div class="form-group">
+        <label for="phone">Телефон *</label>
+        <input type="tel" id="phone" name="phone" 
+               value="{{ employee.phone if employee else '' }}" required>
+        <small>Формат: +7XXXXXXXXXX</small>
+    </div>
+    
+    <div class="form-group">
+        <label for="email">Email *</label>
+        <input type="email" id="email" name="email" 
+               value="{{ employee.email if employee else '' }}" required>
+    </div>
+    
+    <div class="form-group">
+        <label for="hire_date">Дата устройства на работу *</label>
+        <input type="date" id="hire_date" name="hire_date" 
+               value="{{ employee.hire_date if employee else '' }}" required>
+    </div>
+    
+    <div class="form-group">
+        <label>
+            <input type="checkbox" id="on_probation" name="on_probation" 
+                   {% if employee and employee.on_probation %}checked{% endif %}>
+            На испытательном сроке
+        </label>
+    </div>
+    
+    <div class="form-actions">
+        <button type="submit" class="btn-save">
+            💾 {% if employee %}Сохранить изменения{% else %}Добавить сотрудника{% endif %}
+        </button>
+        <a href="{{ url_for('index') }}" class="btn-cancel">❌ Отмена</a>
+    </div>
+</form>
+
+<div class="form-help">
+    <p><strong>*</strong> — обязательные для заполнения поля</p>
+    <p>Все данные проверяются на корректность перед сохранением.</p>
+</div>
+{% endblock %}

@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+
+{% block title %}Вход в систему{% endblock %}
+
+{% block content %}
+<h2>Вход в систему отдела кадров</h2>
+
+<form method="POST" action="{{ url_for('login') }}">
+    <div class="form-group">
+        <label for="username">Логин:</label>
+        <input type="text" id="username" name="username" required>
+    </div>
+    
+    <div class="form-group">
+        <label for="password">Пароль:</label>
+        <input type="password" id="password" name="password" required>
+    </div>
+    
+    <button type="submit">Войти</button>
+</form>
+
+<div class="login-info">
+    <p>Логин: <code>admin</code></p>
+    <p>Пароль: <code>admin123</code></p>
+</div>
+{% endblock %}

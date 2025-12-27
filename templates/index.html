@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h2>Список сотрудников</h2>
+
+<!-- Форма поиска -->
+<form method="GET" action="{{ url_for('index') }}" class="search-form">
+    <input type="text" name="search" value="{{ search_query }}" placeholder="Поиск...">
+    <select name="field">
+        <option value="full_name" {% if search_field=='full_name' %}selected{% endif %}>ФИО</option>
+        <option value="position" {% if search_field=='position' %}selected{% endif %}>Должность</option>
+        <option value="phone" {% if search_field=='phone' %}selected{% endif %}>Телефон</option>
+        <option value="email" {% if search_field=='email' %}selected{% endif %}>Email</option>
+        <option value="on_probation" {% if search_field=='on_probation' %}selected{% endif %}>Исп. срок</option>
+    </select>
+    <button type="submit">Найти</button>
+</form>
+
+<!-- Таблица сотрудников -->
+<table class="employees-table">
+    <thead>
+        <tr>
+            <th><a href="?sort_by=id&order={% if sort_by=='id' and sort_order=='asc' %}desc{% else %}asc{% endif %}">ID</a></th>
+            <th><a href="?sort_by=full_name&order={% if sort_by=='full_name' and sort_order=='asc' %}desc{% else %}asc{% endif %}">ФИО</a></th>
+            <th><a href="?sort_by=position&order={% if sort_by=='position' and sort_order=='asc' %}desc{% else %}asc{% endif %}">Должность</a></th>
+            <th><a href="?sort_by=gender&order={% if sort_by=='gender' and sort_order=='asc' %}desc{% else %}asc{% endif %}">Пол</a></th>
+            <th>Телефон</th>
+            <th>Email</th>
+            <th><a href="?sort_by=hire_date&order={% if sort_by=='hire_date' and sort_order=='asc' %}desc{% else %}asc{% endif %}">Дата устройства</a></th>
+            <!-- ДОБАВЛЯЕМ КОЛОНКУ ДЛЯ ИСПЫТАТЕЛЬНОГО СРОКА -->
+            <th><a href="?sort_by=on_probation&order={% if sort_by=='on_probation' and sort_order=='asc' %}desc{% else %}asc{% endif %}">Исп. срок</a></th>
+            {% if current_user.is_authenticated %}
+            <th>Действия</th>
+            {% endif %}
+        </tr>
+    </thead>
+    <tbody>
+        {% for employee in employees %}
+        <tr>
+            <td>{{ employee.id }}</td>
+            <td>{{ employee.full_name }}</td>
+            <td>{{ employee.position }}</td>
+            <td>{{ employee.gender }}</td>
+            <td>{{ employee.phone }}</td>
+            <td>{{ employee.email }}</td>
+            <td>{{ employee.hire_date.strftime('%d.%m.%Y') }}</td>
+            <!-- ДОБАВЛЯЕМ ЯЧЕЙКУ СО СТАТУСОМ -->
+            <td>
+                {% if employee.on_probation %}
+                <span class="probation-yes">✅ Да</span>
+                {% else %}
+                <span class="probation-no">❌ Нет</span>
+                {% endif %}
+            </td>
+            {% if current_user.is_authenticated %}
+            <td class="actions">
+                <a href="{{ url_for('edit_employee', id=employee.id) }}" class="btn-edit">✏️ Редактировать</a>
+                <form action="{{ url_for('delete_employee', id=employee.id) }}" method="POST" style="display:inline;">
+                    <button type="submit" onclick="return confirm('Удалить сотрудника?')" class="btn-delete">
+                        🗑️ Удалить
+                    </button>
+                </form>
+            </td>
+            {% endif %}
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+
+<!-- Пагинация -->
+<div class="pagination">
+    {% if pagination.has_prev %}
+        <a href="?page={{ pagination.prev_num }}&search={{ search_query }}&field={{ search_field }}&sort_by={{ sort_by }}&order={{ sort_order }}">← Назад</a>
+    {% endif %}
+    
+    <span>Страница {{ pagination.page }} из {{ pagination.pages }}</span>
+    <span>(Всего: {{ pagination.total }} сотрудников)</span>
+    
+    {% if pagination.has_next %}
+        <a href="?page={{ pagination.next_num }}&search={{ search_query }}&field={{ search_field }}&sort_by={{ sort_by }}&order={{ sort_order }}">Далее →</a>
+    {% endif %}
+</div>
+
+<!-- Информация для неавторизованных -->
+{% if not current_user.is_authenticated %}
+<div class="info-box">
+    <p>Вы просматриваете список сотрудников как гость. Для добавления, редактирования или удаления сотрудников необходимо <a href="{{ url_for('login') }}">войти в систему</a>.</p>
+</div>
+{% endif %}
+{% endblock %}

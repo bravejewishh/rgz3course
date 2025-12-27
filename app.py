@@ -1,168 +1,254 @@
-# app.py
-import psycopg2
-from psycopg2.extras import RealDictCursor
-from flask import Flask, request, session, jsonify, render_template
+from flask import Flask, render_template, request, redirect, url_for, flash
+from flask_login import LoginManager, login_user, login_required, logout_user, current_user
+from models import db, User, Employee
+from config import Config
+from datetime import datetime
+import re
 
 app = Flask(__name__)
-app.secret_key = 'p_penkova_fbi34_secret'
+app.config.from_object(Config)
 
-# === подключение к БД — как на скриншоте ===
-def get_db():
-    conn = psycopg2.connect(
-        host='127.0.0.1',
-        database='hr_db',
-        user='hr_user',
-        password='hr_pass'
-    )
-    cur = conn.cursor(cursor_factory=RealDictCursor)
-    return conn, cur
+# Инициализация
+db.init_app(app)
+login_manager = LoginManager()
+login_manager.init_app(app)
+login_manager.login_view = 'login'
 
-def close_db(conn, cur):
-    conn.commit()
-    cur.close()
-    conn.close()
+@login_manager.user_loader
+def load_user(user_id):
+    return User.query.get(int(user_id))
 
-# === роуты ===
+# Данные студента (должны быть на каждой странице)
+STUDENT_INFO = {
+    'full_name': 'Пенькова Полина Александровна',
+    'group': 'ФБИ-34'
+}
+
+# ================== ИНИЦИАЛИЗАЦИЯ БАЗЫ ДАННЫХ ==================
+def init_database():
+    """Инициализация базы данных с тестовыми данными"""
+    with app.app_context():
+        # Создаём таблицы если их нет
+        db.create_all()
+        
+        # Создаём администратора (для отчёта)
+        if not User.query.filter_by(username='admin').first():
+            admin = User(username='admin')
+            admin.set_password('admin123')  # Пароль: admin123
+            db.session.add(admin)
+            print("Администратор создан: логин=admin, пароль=admin123")
+        
+        # Создаём 100+ тестовых сотрудников
+        if Employee.query.count() < 100:
+            # Простой способ создать тестовые данные
+            positions = ['Программист', 'Тестировщик', 'Аналитик', 'Менеджер', 'Дизайнер']
+            genders = ['муж', 'жен']
+            
+            import random
+            from datetime import date, timedelta
+            
+            for i in range(120):
+                # Генерируем тестовые данные
+                gender = random.choice(genders)
+                if gender == 'муж':
+                    names = ['Иванов Иван', 'Петров Пётр', 'Сидоров Алексей', 'Кузнецов Дмитрий']
+                else:
+                    names = ['Иванова Анна', 'Петрова Мария', 'Сидорова Елена', 'Кузнецова Ольга']
+                
+                employee = Employee(
+                    full_name=random.choice(names),
+                    position=random.choice(positions),
+                    gender=gender,
+                    phone=f'+7{random.randint(900,999)}{random.randint(1000000,9999999)}',
+                    email=f'employee{i}@company.com',
+                    on_probation=random.choice([True, False]),
+                    hire_date=date.today() - timedelta(days=random.randint(0, 365*3))
+                )
+                db.session.add(employee)
+            
+            db.session.commit()
+            print(f"Создано {Employee.query.count()} тестовых сотрудников")
+
+# ================== ГЛАВНЫЕ МАРШРУТЫ ==================
+
 @app.route('/')
 def index():
-    return render_template('index.html', fio='пенькова полина александровна', group='фби-34')
+    """Главная страница - список сотрудников"""
+    # Пагинация: показываем по 20 сотрудников
+    page = request.args.get('page', 1, type=int)
+    per_page = 20
+    
+    # Поиск
+    search_query = request.args.get('search', '')
+    search_field = request.args.get('field', 'full_name')
+    
+    if search_query:
+        employees_query = Employee.search_by_field(search_field, search_query)
+    else:
+        employees_query = Employee.query
+    
+    # Сортировка
+    sort_by = request.args.get('sort_by', 'id')
+    sort_order = request.args.get('order', 'asc')
+    
+    if hasattr(Employee, sort_by):
+        column = getattr(Employee, sort_by)
+        if sort_order == 'asc':
+            employees_query = employees_query.order_by(column.asc())
+        else:
+            employees_query = employees_query.order_by(column.desc())
+    
+    # Пагинация
+    pagination = employees_query.paginate(page=page, per_page=per_page, error_out=False)
+    employees = pagination.items
+    
+    return render_template('index.html',
+                         employees=employees,
+                         pagination=pagination,
+                         student=STUDENT_INFO,
+                         search_query=search_query,
+                         search_field=search_field,
+                         sort_by=sort_by,
+                         sort_order=sort_order)
 
-@app.route('/api/login', methods=['POST'])
+@app.route('/login', methods=['GET', 'POST'])
 def login():
-    data = request.get_json()
-    login = data.get('login')
-    password = data.get('password')
+    """Страница входа"""
+    if current_user.is_authenticated:
+        return redirect(url_for('index'))
+    
+    if request.method == 'POST':
+        username = request.form.get('username')
+        password = request.form.get('password')
+        
+        user = User.query.filter_by(username=username).first()
+        
+        if user and user.check_password(password):
+            login_user(user)
+            flash('Вы успешно вошли в систему', 'success')
+            return redirect(url_for('index'))
+        else:
+            flash('Неверный логин или пароль', 'error')
+    
+    return render_template('login.html', student=STUDENT_INFO)
 
-    conn, cur = get_db()
-    cur.execute('SELECT id FROM users WHERE login = %s AND password_hash = %s', 
-                (login, f'plain:{password}'))
-    user = cur.fetchone()
-    close_db(conn, cur)
-
-    if user:
-        session['user_id'] = user['id']
-        return jsonify({'ok': True})
-
-    return jsonify({'error': 'неверный логин или пароль'}), 401
-
-@app.route('/api/logout', methods=['POST'])
+@app.route('/logout')
+@login_required
 def logout():
-    session.pop('user_id', None)
-    return jsonify({'ok': True})
+    """Выход из системы"""
+    logout_user()
+    flash('Вы вышли из системы', 'info')
+    return redirect(url_for('index'))
 
-@app.route('/api/employees')
-def get_employees():
-    search = request.args.get('search', '').lower()
-    sort = request.args.get('sort', 'fio')
-    order = request.args.get('order', 'asc')
-    try:
-        offset = int(request.args.get('offset', 0))
-        limit = int(request.args.get('limit', 20))
-    except:
-        offset, limit = 0, 20
+@app.route('/employee/new', methods=['GET', 'POST'])
+@login_required
+def new_employee():
+    """Добавление нового сотрудника"""
+    if request.method == 'POST':
+        try:
+            # Получаем данные из формы
+            full_name = request.form.get('full_name')
+            position = request.form.get('position')
+            gender = request.form.get('gender')
+            phone = request.form.get('phone')
+            email = request.form.get('email')
+            on_probation = 'on_probation' in request.form
+            hire_date_str = request.form.get('hire_date')
+            
+            # Простая валидация
+            errors = []
+            if not full_name or len(full_name.strip()) < 2:
+                errors.append("ФИО должно содержать минимум 2 символа")
+            if not position:
+                errors.append("Укажите должность")
+            if gender not in ['муж', 'жен']:
+                errors.append("Укажите пол")
+            if not phone:
+                errors.append("Укажите телефон")
+            if not email or '@' not in email:
+                errors.append("Некорректный email")
+            
+            if errors:
+                for error in errors:
+                    flash(error, 'error')
+                return render_template('employee_form.html', student=STUDENT_INFO)
+            
+            # Парсим дату
+            hire_date = datetime.strptime(hire_date_str, '%Y-%m-%d').date()
+            
+            # Создаём сотрудника
+            employee = Employee(
+                full_name=full_name,
+                position=position,
+                gender=gender,
+                phone=phone,
+                email=email,
+                on_probation=on_probation,
+                hire_date=hire_date
+            )
+            
+            db.session.add(employee)
+            db.session.commit()
+            
+            flash('Сотрудник успешно добавлен', 'success')
+            return redirect(url_for('index'))
+            
+        except Exception as e:
+            db.session.rollback()
+            flash(f'Ошибка при добавлении: {str(e)}', 'error')
+    
+    return render_template('employee_form.html', student=STUDENT_INFO, employee=None)
 
-    if sort not in ['fio', 'position', 'gender', 'hire_date']:
-        sort = 'fio'
-    if order not in ['asc', 'desc']:
-        order = 'asc'
+@app.route('/employee/<int:id>/edit', methods=['GET', 'POST'])
+@login_required
+def edit_employee(id):
+    """Редактирование сотрудника"""
+    employee = Employee.query.get_or_404(id)
+    
+    if request.method == 'POST':
+        try:
+            employee.full_name = request.form.get('full_name')
+            employee.position = request.form.get('position')
+            employee.gender = request.form.get('gender')
+            employee.phone = request.form.get('phone')
+            employee.email = request.form.get('email')
+            employee.on_probation = 'on_probation' in request.form
+            
+            hire_date_str = request.form.get('hire_date')
+            if hire_date_str:
+                employee.hire_date = datetime.strptime(hire_date_str, '%Y-%m-%d').date()
+            
+            db.session.commit()
+            flash('Данные сотрудника обновлены', 'success')
+            return redirect(url_for('index'))
+            
+        except Exception as e:
+            db.session.rollback()
+            flash(f'Ошибка при обновлении: {str(e)}', 'error')
+    
+    return render_template('employee_form.html', student=STUDENT_INFO, employee=employee)
 
-    conn, cur = get_db()
-
-    where, params = "", []
-    if search:
-        where = """WHERE
-            LOWER(fio) LIKE %s OR
-            LOWER(position) LIKE %s OR
-            LOWER(phone) LIKE %s OR
-            LOWER(email) LIKE %s"""
-        term = f'%{search}%'
-        params = [term] * 4
-
-    query = f"SELECT * FROM employees {where} ORDER BY {sort} {order} LIMIT %s OFFSET %s"
-    params.extend([limit, offset])
-    cur.execute(query, params)
-    rows = cur.fetchall()
-    close_db(conn, cur)
-
-    return jsonify([dict(row) for row in rows])
-
-@app.route('/api/employees', methods=['POST'])
-def add_employee():
-    if 'user_id' not in session:
-        return jsonify({'error': 'не авторизован'}), 403
-
-    data = request.get_json()
-    fio = data.get('fio', '').strip()
-    position = data.get('position', '').strip()
-    gender = data.get('gender')
-    hire_date = data.get('hire_date')
-
-    if not fio or not position or not hire_date or gender not in ('м', 'ж'):
-        return jsonify({'error': 'заполните фио, должность, дату; пол — м/ж'}), 400
-
-    conn, cur = get_db()
-    cur.execute('''
-        INSERT INTO employees (fio, position, gender, phone, email, probation, hire_date)
-        VALUES (%s, %s, %s, %s, %s, %s, %s)
-    ''', (
-        fio, position, gender,
-        data.get('phone', ''),
-        data.get('email', ''),
-        data.get('probation', False),
-        hire_date
-    ))
-    conn.commit()
-    cur.execute("SELECT currval('employees_id_seq')")
-    new_id = cur.fetchone()['currval']
-    close_db(conn, cur)
-
-    return jsonify({
-        'id': new_id, 'fio': fio, 'position': position, 'gender': gender,
-        'phone': data.get('phone', ''), 'email': data.get('email', ''),
-        'probation': data.get('probation', False), 'hire_date': hire_date
-    }), 201
-
-@app.route('/api/employees/<int:id>', methods=['PUT'])
-def update_employee(id):
-    if 'user_id' not in session:
-        return jsonify({'error': 'не авторизован'}), 403
-
-    data = request.get_json()
-    fio = data.get('fio', '').strip()
-    position = data.get('position', '').strip()
-    gender = data.get('gender')
-    hire_date = data.get('hire_date')
-
-    if not fio or not position or not hire_date or gender not in ('м', 'ж'):
-        return jsonify({'error': 'заполните фио, должность, дату; пол — м/ж'}), 400
-
-    conn, cur = get_db()
-    cur.execute('''
-        UPDATE employees SET
-            fio = %s, position = %s, gender = %s, phone = %s, email = %s, probation = %s, hire_date = %s
-        WHERE id = %s
-    ''', (
-        fio, position, gender,
-        data.get('phone', ''),
-        data.get('email', ''),
-        data.get('probation', False),
-        hire_date,
-        id
-    ))
-    close_db(conn, cur)
-
-    return jsonify({
-        'id': id, 'fio': fio, 'position': position, 'gender': gender,
-        'phone': data.get('phone', ''), 'email': data.get('email', ''),
-        'probation': data.get('probation', False), 'hire_date': hire_date
-    })
-
-@app.route('/api/employees/<int:id>', methods=['DELETE'])
+@app.route('/employee/<int:id>/delete', methods=['POST'])
+@login_required
 def delete_employee(id):
-    if 'user_id' not in session:
-        return jsonify({'error': 'не авторизован'}), 403
+    """Удаление сотрудника"""
+    employee = Employee.query.get_or_404(id)
+    
+    try:
+        db.session.delete(employee)
+        db.session.commit()
+        flash('Сотрудник удалён', 'success')
+    except Exception as e:
+        db.session.rollback()
+        flash(f'Ошибка при удалении: {str(e)}', 'error')
+    
+    return redirect(url_for('index'))
 
-    conn, cur = get_db()
-    cur.execute('DELETE FROM employees WHERE id = %s', (id,))
-    close_db(conn, cur)
-    return '', 204
+
+
+# Инициализация базы данных при старте
+with app.app_context():
+    init_database()
+
+if __name__ == '__main__':
+    app.run(debug=True)
